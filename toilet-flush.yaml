@@ -1,0 +1,171 @@
+substitutions:
+  servo_pin: GPIO14  # D5 on the ESP8266 D1 mini
+
+esphome:
+  name: toilet-flush
+  friendly_name: Toilet Flush
+
+esp8266:
+  board: d1_mini
+  restore_from_flash: true
+
+logger:
+
+api:
+  encryption:
+    key: !secret toilet_flush_api_key
+
+ota:
+  - platform: esphome
+    password: !secret toilet_flush_ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+output:
+  - platform: esp8266_pwm
+    id: servo_pwm
+    pin: ${servo_pin}
+    frequency: 50 Hz
+
+servo:
+  - id: flush_servo
+    output: servo_pwm
+    min_level: 5%
+    idle_level: 7.5%
+    max_level: 10%
+
+number:
+  # Angles are nominal. Actual travel depends on the servo and linkage.
+  - platform: template
+    id: home_angle
+    name: "Початкова позиція"
+    unit_of_measurement: "°"
+    min_value: 0
+    max_value: 180
+    step: 1
+    initial_value: 90
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    mode: box
+
+  - platform: template
+    id: travel_angle
+    name: "Кут повороту"
+    unit_of_measurement: "°"
+    min_value: 1
+    max_value: 180
+    step: 1
+    initial_value: 15
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    mode: box
+
+  - platform: template
+    id: lift_seconds
+    name: "Час підняття"
+    unit_of_measurement: s
+    min_value: 0.2
+    max_value: 10
+    step: 0.1
+    initial_value: 0.6
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    mode: box
+
+  - platform: template
+    id: hold_seconds
+    name: "Час утримання"
+    unit_of_measurement: s
+    min_value: 0
+    max_value: 10
+    step: 0.1
+    initial_value: 0.5
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    mode: box
+
+  - platform: template
+    id: return_seconds
+    name: "Час повернення"
+    unit_of_measurement: s
+    min_value: 0.2
+    max_value: 10
+    step: 0.1
+    initial_value: 0.6
+    optimistic: true
+    restore_value: true
+    entity_category: config
+    mode: box
+
+select:
+  - platform: template
+    id: travel_direction
+    name: "Напрямок повороту"
+    options:
+      - "До більшого кута"
+      - "До меншого кута"
+    initial_option: "До більшого кута"
+    optimistic: true
+    restore_value: true
+    entity_category: config
+
+button:
+  - platform: template
+    name: "Змити"
+    icon: mdi:toilet
+    on_press:
+      - lambda: |-
+          if (id(flush_cycle).is_running()) {
+            return;
+          }
+
+          const float home = id(home_angle).state;
+          const float travel = id(travel_angle).state;
+          const bool reverse = id(travel_direction).active_index().value_or(0) == 1;
+          const float target = home + (reverse ? -travel : travel);
+          if (target < 0.0f || target > 180.0f) {
+            ESP_LOGW("flush", "Target angle %.0f is outside 0-180 degrees", target);
+            return;
+          }
+
+          id(flush_cycle).execute(home, target, id(lift_seconds).state,
+                                 id(hold_seconds).state, id(return_seconds).state);
+
+script:
+  - id: flush_cycle
+    mode: single
+    parameters:
+      home: float
+      target: float
+      lift_time: float
+      hold_time: float
+      return_time: float
+    then:
+      - lambda: |-
+          id(flush_servo).set_transition_length(0);
+          id(flush_servo).write(home / 90.0f - 1.0f);
+      - delay: 500ms
+      - lambda: |-
+          // ESPHome defines the transition duration over the full 180-degree range.
+          const float full_range = 180.0f / fabsf(target - home);
+          id(flush_servo).set_transition_length(lroundf(lift_time * 1000.0f * full_range));
+          id(flush_servo).write(target / 90.0f - 1.0f);
+      - wait_until:
+          condition:
+            lambda: return id(flush_servo).has_reached_target();
+      - delay: !lambda return lroundf(hold_time * 1000.0f);
+      - lambda: |-
+          const float full_range = 180.0f / fabsf(target - home);
+          id(flush_servo).set_transition_length(lroundf(return_time * 1000.0f * full_range));
+          id(flush_servo).write(home / 90.0f - 1.0f);
+      - wait_until:
+          condition:
+            lambda: return id(flush_servo).has_reached_target();
+      - delay: 200ms
+      - servo.detach: flush_servo
