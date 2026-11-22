@@ -14,6 +14,11 @@ The **Flush** button (`Змити` in the firmware) in Home Assistant triggers a
 | Wire, splitters for 5 V and GND, and a USB cable for flashing | Connect the power supply, controller, and servo. Use a three-wire servo extension if needed. |
 | Printed clip and two enclosure halves | The clip holds the servo on the tank rim. The enclosure protects the board from accidental contact and keeps the wiring in place. |
 
+**AliExpress listings**
+
+- [Item 3256805599378977](https://www.aliexpress.us/item/3256805599378977.html)
+- [Item 3256806798651168](https://www.aliexpress.us/item/3256806798651168.html)
+
 ## 3D models
 
 | File | Part |
